@@ -1,0 +1,9 @@
+name: archive_downloader
+channels:
+  - defaults
+dependencies:
+  - python=3.8
+  - requests
+  - tqdm
+  - pycryptodome
+  - img2pdf
