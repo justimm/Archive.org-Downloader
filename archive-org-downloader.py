@@ -9,6 +9,52 @@ import os
 import sys
 import shutil
 import json
+import re
+import base64
+import hashlib
+from urllib.parse import quote
+from Crypto.Cipher import AES
+from Crypto.Util import Counter
+
+# --- New Deobfuscation Function ---
+def deobfuscate_image(image_data, src, obfuscation_header):
+	"""
+	Decrypts the first 1024 bytes of image_data using AES-CTR.
+	The obfuscation_header is expected in the form "1|<base64encoded_counter>"
+	where the base64-decoded counter is 16 bytes.
+	We derive the AES key by taking the SHA-1 digest of the image URL (with protocol/host removed)
+	and using the first 16 bytes.
+	For AES-CTR, we use a 16-byte counter block. The first 8 bytes are used as a fixed prefix,
+	and the remaining 8 bytes (interpreted as a big-endian integer) are used as the initial counter value.
+	"""
+	try:
+		version, counter_b64 = obfuscation_header.split('|')
+	except Exception as e:
+		raise ValueError("Invalid X-Obfuscate header format") from e
+
+	if version != '1':
+		raise ValueError("Unsupported obfuscation version: " + version)
+
+	# Derive AES key: replace protocol/host in src with '/'
+	aesKey = re.sub(r"^https?:\/\/.*?\/", "/", src)
+	sha1_digest = hashlib.sha1(aesKey.encode('utf-8')).digest()
+	key = sha1_digest[:16]
+
+	# Decode the counter (should be 16 bytes)
+	counter_bytes = base64.b64decode(counter_b64)
+	if len(counter_bytes) != 16:
+		raise ValueError(f"Expected counter to be 16 bytes, got {len(counter_bytes)}")
+
+	prefix = counter_bytes[:8]
+	initial_value = int.from_bytes(counter_bytes[8:], byteorder='big')
+
+	# Create AES-CTR cipher with a 64-bit counter length.
+	ctr = Counter.new(64, prefix=prefix, initial_value=initial_value, little_endian=False)
+	cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+
+	decrypted_part = cipher.decrypt(image_data[:1024])
+	new_data = decrypted_part + image_data[1024:]
+	return new_data
 
 def display_error(response, message):
 	print(message)
@@ -114,10 +160,20 @@ def download_one_image(session, link, i, directory, book_id, pages):
 			time.sleep(1)	# Wait 1 second before retrying
 
 	image = image_name(pages, i, directory)
-	with open(image,"wb") as f:
-		f.write(response.content)
-
-
+	
+	if response.headers.get("Content-Type", "").lower().find("image") != -1 and len(response.content) > 100:
+		obf_header = response.headers.get("X-Obfuscate")
+		if obf_header:
+			try:
+				new_content = deobfuscate_image(response.content, link, obf_header)
+			except Exception as e:
+				print(f"[ERROR] Deobfuscation failed: {e}")
+				return
+		else:
+			new_content = response.content
+		with open(image, "wb") as f:
+			f.write(new_content)
+			
 def download(session, n_threads, directory, links, scale, book_id):
 	print("Downloading pages...")
 	links = [f"{link}&rotate=0&scale={scale}" for link in links]
