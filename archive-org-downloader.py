@@ -206,6 +206,15 @@ def make_pdf(pdf, title, directory):
 		f.write(pdf)
 	print(f"[+] PDF saved as \"{file}\"")
 
+def swap_adjacent_pages(seq):
+	seq = list(seq)
+	n = len(seq)
+	if n < 3:
+		return seq
+	for i in range(1, n - 2, 2):
+		seq[i], seq[i + 1] = seq[i + 1], seq[i]
+	return seq
+	
 if __name__ == "__main__":
 
 	my_parser = argparse.ArgumentParser()
@@ -218,6 +227,7 @@ if __name__ == "__main__":
 	my_parser.add_argument('-t', '--threads', help="Maximum number of threads, [default 50]", type=int, default=50)
 	my_parser.add_argument('-j', '--jpg', help="Output to individual JPG's rather than a PDF", action='store_true')
 	my_parser.add_argument('-m', '--meta', help="Output the metadata of the book to a json file (-j option required)", action='store_true')
+	my_parser.add_argument('-s', '--swap', help="Swap adjacent pages except the first and last", action='store_true')
 
 	if len(sys.argv) == 1:
 		my_parser.print_help(sys.stderr)
@@ -315,6 +325,9 @@ if __name__ == "__main__":
 			# keywords
 			pdfmeta['keywords'] = [f"https://archive.org/details/{book_id}"]
 
+			if args.swap:
+				images = swap_adjacent_pages(images)
+							
 			pdf = img2pdf.convert(images, **pdfmeta)
 			make_pdf(pdf, title, args.dir if args.dir != None else "")
 			try:
@@ -323,3 +336,4 @@ if __name__ == "__main__":
 				print ("Error: %s - %s." % (e.filename, e.strerror))
 
 		return_loan(session, book_id)
+
